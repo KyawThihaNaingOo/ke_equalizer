@@ -1,0 +1,18 @@
+{
+  "title": "KE Equalizer Example",
+  "icon-size": 96,
+  "contents": [
+    {
+      "x": 180,
+      "y": 170,
+      "type": "file",
+      "path": "../build/macos/Build/Products/Release/KE Equalizer Example.app"
+    },
+    {
+      "x": 420,
+      "y": 170,
+      "type": "link",
+      "path": "/Applications"
+    }
+  ]
+}
