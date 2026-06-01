@@ -198,6 +198,16 @@ class AppNotifier extends Notifier<AppState> {
     }
   }
 
+  Future<void> loadAudio(KeAudioSource source) async {
+    try {
+      state = state.copyWith(status: 'Loading…');
+      final updated = await _equalizer.load(source);
+      state = state.copyWith(equalizerState: updated, status: 'Loaded');
+    } on PlatformException catch (e) {
+      state = state.copyWith(status: e.message ?? e.code);
+    }
+  }
+
   void setSaveAfterMicStop(bool value) =>
       state = state.copyWith(saveAfterMicStop: value);
 
@@ -287,6 +297,7 @@ class MyApp extends ConsumerWidget {
                       onPlayPause: notifier.playPause,
                       onBandChanged: notifier.setBand,
                       onPresetSelected: notifier.setPreset,
+                      onLoadAudio: notifier.loadAudio,
                     ),
                     _AnalyzerTab(
                       micActive: state.micActive,
@@ -315,6 +326,7 @@ class _EqualizerTab extends StatelessWidget {
     required this.onPlayPause,
     required this.onBandChanged,
     required this.onPresetSelected,
+    required this.onLoadAudio,
   });
 
   final KeEqualizerState? state;
@@ -323,6 +335,7 @@ class _EqualizerTab extends StatelessWidget {
   final VoidCallback onPlayPause;
   final ValueChanged<KeEqualizerBand> onBandChanged;
   final ValueChanged<KeEqualizerPreset> onPresetSelected;
+  final ValueChanged<KeAudioSource> onLoadAudio;
 
   @override
   Widget build(BuildContext context) {
@@ -358,12 +371,32 @@ class _EqualizerTab extends StatelessWidget {
         const SizedBox(height: 16),
         SizedBox(height: 120, child: _EqCurveDisplay(bands: bands)),
         const SizedBox(height: 20),
-        FilledButton.icon(
-          onPressed: canPlay ? onPlayPause : null,
-          icon: Icon(
-            isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          ),
-          label: Text(isPlaying ? 'Pause' : 'Play'),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: canPlay ? onPlayPause : null,
+                icon: Icon(
+                  isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                ),
+                label: Text(isPlaying ? 'Pause' : 'Play'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            OutlinedButton.icon(
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: const Color(0xFF0D1F28),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                builder: (_) => _LoadAudioSheet(onLoad: onLoadAudio),
+              ),
+              icon: const Icon(Icons.folder_open_rounded),
+              label: const Text('Load'),
+            ),
+          ],
         ),
         if (presets.isNotEmpty) ...<Widget>[
           const SizedBox(height: 16),
@@ -640,6 +673,117 @@ class _AnalyzerTab extends StatelessWidget {
                 'Microphone analysis is not supported on this platform.',
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Load audio bottom sheet ───────────────────────────────────────────────────
+
+class _LoadAudioSheet extends StatefulWidget {
+  const _LoadAudioSheet({required this.onLoad});
+  final ValueChanged<KeAudioSource> onLoad;
+
+  @override
+  State<_LoadAudioSheet> createState() => _LoadAudioSheetState();
+}
+
+class _LoadAudioSheetState extends State<_LoadAudioSheet> {
+  KeAudioSourceType _type = KeAudioSourceType.asset;
+  final _controller = TextEditingController(text: 'assets/demo_tone.wav');
+
+  static const _hints = {
+    KeAudioSourceType.asset: 'assets/demo_tone.wav',
+    KeAudioSourceType.file: '/path/to/audio.mp3',
+    KeAudioSourceType.url: 'https://example.com/audio.mp3',
+  };
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onTypeChanged(KeAudioSourceType type) {
+    setState(() {
+      _type = type;
+      _controller.text = _hints[type]!;
+    });
+  }
+
+  void _load() {
+    final value = _controller.text.trim();
+    if (value.isEmpty) return;
+    final source = switch (_type) {
+      KeAudioSourceType.asset => KeAudioSource.asset(value),
+      KeAudioSourceType.file  => KeAudioSource.file(value),
+      KeAudioSourceType.url   => KeAudioSource.url(value),
+    };
+    widget.onLoad(source);
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20, 24, 20,
+        20 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const Text(
+            'Load Audio',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 20),
+          SegmentedButton<KeAudioSourceType>(
+            segments: const <ButtonSegment<KeAudioSourceType>>[
+              ButtonSegment(
+                value: KeAudioSourceType.asset,
+                label: Text('Asset'),
+                icon: Icon(Icons.inventory_2_outlined),
+              ),
+              ButtonSegment(
+                value: KeAudioSourceType.file,
+                label: Text('Local File'),
+                icon: Icon(Icons.insert_drive_file_outlined),
+              ),
+              ButtonSegment(
+                value: KeAudioSourceType.url,
+                label: Text('URL'),
+                icon: Icon(Icons.language_rounded),
+              ),
+            ],
+            selected: <KeAudioSourceType>{_type},
+            onSelectionChanged: (s) => _onTypeChanged(s.first),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: _hints[_type],
+              hintStyle: const TextStyle(color: _subtleColor),
+              filled: true,
+              fillColor: _borderColor,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            onSubmitted: (_) => _load(),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: _load, child: const Text('Load')),
         ],
       ),
     );
